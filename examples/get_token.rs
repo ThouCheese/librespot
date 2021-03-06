@@ -10,28 +10,21 @@ const SCOPES: &str =
 
 #[tokio::main]
 async fn main() {
-    let session_config = SessionConfig {
-        user_agent: "just testing".to_string(),
-        device_id: "testing device".to_string(),
-        proxy: None,
-        ap_port: None,
-    };
+    let session_config = SessionConfig::default();
 
     let args: Vec<_> = env::args().collect();
     if args.len() != 4 {
-        println!("Usage: {} USERNAME PASSWORD CLIENT_ID", args[0]);
+        eprintln!("Usage: {} USERNAME PASSWORD CLIENT_ID", args[0]);
+        return;
     }
-    let username = args[1].to_owned();
-    let password = args[2].to_owned();
-    let client_id = &args[3];
 
     println!("Connecting..");
-    let credentials = Credentials::with_password(username, password);
+    let credentials = Credentials::with_password(&args[1], &args[2]);
     let session = Session::connect(session_config, credentials, None).await.unwrap();
 
     println!(
         "Token: {:#?}",
-        keymaster::get_token(&session, &client_id, SCOPES)
+        keymaster::get_token(&session, &args[3], SCOPES)
             .await
             .unwrap()
     );

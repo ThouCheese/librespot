@@ -25,11 +25,14 @@ pub struct Credentials {
 }
 
 impl Credentials {
-    pub fn with_password(username: String, password: String) -> Credentials {
+    pub fn with_password(
+        username: impl Into<String>,
+        password: impl Into<String>,
+    ) -> Credentials {
         Credentials {
-            username: username,
+            username: username.into(),
             auth_type: AuthenticationType::AUTHENTICATION_USER_PASS,
-            auth_data: password.into_bytes(),
+            auth_data: password.into().into_bytes(),
         }
     }
 

@@ -10,6 +10,17 @@ pub struct SessionConfig {
     pub ap_port: Option<u16>,
 }
 
+impl Default for SessionConfig {
+    fn default() -> Self {
+        Self {
+            user_agent: "librespot rust client".to_string(),
+            device_id: "Rust Client".to_string(),
+            proxy: None,
+            ap_port: None,
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Hash, PartialOrd, Ord, PartialEq, Eq)]
 pub enum DeviceType {
     Unknown = 0,

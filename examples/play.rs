@@ -10,12 +10,7 @@ use librespot::playback::player::Player;
 
 #[tokio::main]
 async fn main() {
-    let session_config = SessionConfig {
-        user_agent: "just testing".to_string(),
-        device_id: "testing device".to_string(),
-        proxy: None,
-        ap_port: None,
-    };
+    let session_config = SessionConfig::default();
     let player_config = PlayerConfig::default();
 
     let args: Vec<_> = env::args().collect();
@@ -23,9 +18,7 @@ async fn main() {
         eprintln!("Usage: {} USERNAME PASSWORD TRACK", args[0]);
         return;
     }
-    let username = args[1].to_owned();
-    let password = args[2].to_owned();
-    let credentials = Credentials::with_password(username, password);
+    let credentials = Credentials::with_password(&args[1], &args[2]);
 
     let track = SpotifyId::from_base62("1hHuyqVCZCbhYQixEkdQCo").unwrap();
 
