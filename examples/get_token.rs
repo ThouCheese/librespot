@@ -1,5 +1,4 @@
 use std::env;
-use tokio_core::reactor::Core;
 
 use librespot::core::authentication::Credentials;
 use librespot::core::config::SessionConfig;
@@ -9,11 +8,14 @@ use librespot::core::session::Session;
 const SCOPES: &str =
     "streaming,user-read-playback-state,user-modify-playback-state,user-read-currently-playing";
 
-fn main() {
-    let mut core = Core::new().unwrap();
-    let handle = core.handle();
-
-    let session_config = SessionConfig::default();
+#[tokio::main]
+async fn main() {
+    let session_config = SessionConfig {
+        user_agent: "just testing".to_string(),
+        device_id: "testing device".to_string(),
+        proxy: None,
+        ap_port: None,
+    };
 
     let args: Vec<_> = env::args().collect();
     if args.len() != 4 {
@@ -25,13 +27,12 @@ fn main() {
 
     println!("Connecting..");
     let credentials = Credentials::with_password(username, password);
-    let session = core
-        .run(Session::connect(session_config, credentials, None, handle))
-        .unwrap();
+    let session = Session::connect(session_config, credentials, None).await.unwrap();
 
     println!(
         "Token: {:#?}",
-        core.run(keymaster::get_token(&session, &client_id, SCOPES))
+        keymaster::get_token(&session, &client_id, SCOPES)
+            .await
             .unwrap()
     );
 }
