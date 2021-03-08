@@ -5,13 +5,28 @@ use std::error;
 use std::fmt;
 use std::io::{Read, Seek};
 
+/// A wrapper struct around a stream that yields decoded data rather than raw data.
 pub struct VorbisDecoder<R: Read + Seek>(OggStreamReader<R>);
+
+/// The error returned when decoding fails.
 pub struct VorbisError(lewton::VorbisError);
 
 impl<R> VorbisDecoder<R>
 where
     R: Read + Seek,
 {
+    /// Construct a new `VorbisDecoder` from an object that implements `Read` and `Seek`.
+    ///
+    /// ### Example
+    /// ```rust
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// use librespot_audio::VorbisDecoder;
+    /// use std::fs::File;
+    ///
+    /// let f = File::open("/some/file.txt")?;
+    /// # Ok(())
+    /// # }
+    /// ```
     pub fn new(input: R) -> Result<VorbisDecoder<R>, VorbisError> {
         Ok(VorbisDecoder(OggStreamReader::new(input)?))
     }
@@ -24,8 +39,8 @@ where
     fn seek(&mut self, ms: i64) -> Result<(), AudioError> {
         let absgp = ms * 44100 / 1000;
         match self.0.seek_absgp_pg(absgp as u64) {
-            Ok(_) => return Ok(()),
-            Err(err) => return Err(AudioError::VorbisError(err.into())),
+            Ok(_) => Ok(()),
+            Err(err) => Err(AudioError::VorbisError(err.into())),
         }
     }
 

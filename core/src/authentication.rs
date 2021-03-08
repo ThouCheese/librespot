@@ -4,8 +4,8 @@ use aes::Aes192;
 use byteorder::{BigEndian, ByteOrder};
 use hmac::Hmac;
 use pbkdf2::pbkdf2;
-use protobuf::ProtobufEnum;
 use serde::{Deserialize, Serialize};
+use protobuf::ProtobufEnum;
 use sha1::{Digest, Sha1};
 
 use crate::protocol::authentication::AuthenticationType;
@@ -14,14 +14,10 @@ use crate::protocol::authentication::AuthenticationType;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Credentials {
     pub username: String,
-
-    #[serde(serialize_with = "serialize_protobuf_enum")]
-    #[serde(deserialize_with = "deserialize_protobuf_enum")]
+    #[serde(with = "protobuf_enum")]
     pub auth_type: AuthenticationType,
-
     #[serde(alias = "encoded_auth_blob")]
-    #[serde(serialize_with = "serialize_base64")]
-    #[serde(deserialize_with = "deserialize_base64")]
+    #[serde(with = "base_64")]
     pub auth_data: Vec<u8>,
 }
 
@@ -38,14 +34,32 @@ impl Credentials {
         username: impl Into<String>,
         password: impl Into<String>,
     ) -> Credentials {
-        Credentials {
+        Self {
             username: username.into(),
             auth_type: AuthenticationType::AUTHENTICATION_USER_PASS,
             auth_data: password.into().into_bytes(),
         }
     }
 
-    pub fn with_blob(username: String, encrypted_blob: &str, device_id: &str) -> Credentials {
+    /// Retrieve the credentials from an encrypted blob, using `device_id` as the secret key.
+    ///
+    /// ### Example
+    /// ```rust
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// # let blob = "some blob";
+    /// use librespot_core::authentication::Credentials;
+    /// 
+    /// Credentials::with_blob("my account", blob, "the device id")?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn with_blob(
+        username: impl Into<String>,
+        encrypted_blob: &str,
+        device_id: &str,
+    ) -> io::Result<Credentials> {
+        let username = username.into();
+
         fn read_u8<R: Read>(stream: &mut R) -> io::Result<u8> {
             let mut data = [0u8];
             stream.read_exact(&mut data)?;
@@ -88,7 +102,8 @@ impl Credentials {
             use aes::cipher::generic_array::GenericArray;
             use aes::cipher::{BlockCipher, NewBlockCipher};
 
-            let mut data = base64::decode(encrypted_blob).unwrap();
+            let mut data = base64::decode(encrypted_blob)
+                .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))?;
             let cipher = Aes192::new(GenericArray::from_slice(&key));
             let block_size = <Aes192 as BlockCipher>::BlockSize::to_usize();
             assert_eq!(data.len() % block_size, 0);
@@ -106,51 +121,58 @@ impl Credentials {
         };
 
         let mut cursor = io::Cursor::new(&blob);
-        read_u8(&mut cursor).unwrap();
-        read_bytes(&mut cursor).unwrap();
-        read_u8(&mut cursor).unwrap();
-        let auth_type = read_int(&mut cursor).unwrap();
+        read_u8(&mut cursor)?;
+        read_bytes(&mut cursor)?;
+        read_u8(&mut cursor)?;
+        let auth_type = read_int(&mut cursor)?;
         let auth_type = AuthenticationType::from_i32(auth_type as i32).unwrap();
-        read_u8(&mut cursor).unwrap();
-        let auth_data = read_bytes(&mut cursor).unwrap();
+        read_u8(&mut cursor)?;
+        let auth_data = read_bytes(&mut cursor)?;
 
-        Credentials {
-            username: username,
-            auth_type: auth_type,
-            auth_data: auth_data,
-        }
+        let creds = Self {
+            username: username.into(),
+            auth_type,
+            auth_data,
+        };
+        Ok(creds)
     }
 }
 
-fn serialize_protobuf_enum<T, S>(v: &T, ser: S) -> Result<S::Ok, S::Error>
-where
-    T: ProtobufEnum,
-    S: serde::Serializer,
-{
-    serde::Serialize::serialize(&v.value(), ser)
+mod protobuf_enum {
+    use super::ProtobufEnum;
+
+    pub fn serialize<T, S>(v: &T, ser: S) -> Result<S::Ok, S::Error>
+    where
+        T: ProtobufEnum,
+        S: serde::Serializer,
+    {
+        serde::Serialize::serialize(&v.value(), ser)
+    }
+
+    pub fn deserialize<'de, T, D>(de: D) -> Result<T, D::Error>
+    where
+        T: ProtobufEnum,
+        D: serde::Deserializer<'de>,
+    {
+        let v: i32 = serde::Deserialize::deserialize(de)?;
+        T::from_i32(v).ok_or_else(|| serde::de::Error::custom("Invalid enum value"))
+    }
 }
 
-fn deserialize_protobuf_enum<'de, T, D>(de: D) -> Result<T, D::Error>
-where
-    T: ProtobufEnum,
-    D: serde::Deserializer<'de>,
-{
-    let v: i32 = serde::Deserialize::deserialize(de)?;
-    T::from_i32(v).ok_or_else(|| serde::de::Error::custom("Invalid enum value"))
-}
+mod base_64 {
+    pub fn serialize<T, S>(v: &T, ser: S) -> Result<S::Ok, S::Error>
+    where
+        T: AsRef<[u8]>,
+        S: serde::Serializer,
+    {
+        serde::Serialize::serialize(&base64::encode(v.as_ref()), ser)
+    }
 
-fn serialize_base64<T, S>(v: &T, ser: S) -> Result<S::Ok, S::Error>
-where
-    T: AsRef<[u8]>,
-    S: serde::Serializer,
-{
-    serde::Serialize::serialize(&base64::encode(v.as_ref()), ser)
-}
-
-fn deserialize_base64<'de, D>(de: D) -> Result<Vec<u8>, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    let v: String = serde::Deserialize::deserialize(de)?;
-    base64::decode(&v).map_err(|e| serde::de::Error::custom(e.to_string()))
+    pub fn deserialize<'de, D>(de: D) -> Result<Vec<u8>, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let v: String = serde::Deserialize::deserialize(de)?;
+        base64::decode(&v).map_err(|e| serde::de::Error::custom(e.to_string()))
+    }
 }

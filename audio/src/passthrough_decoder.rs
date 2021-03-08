@@ -68,6 +68,7 @@ where
     return Ok(*stream_serial);
 }
 
+/// A type that wraps a reader.
 pub struct PassthroughDecoder<R: Read + Seek> {
     rdr: PacketReader<R>,
     wtr: PacketWriter<Vec<u8>>,
@@ -76,10 +77,11 @@ pub struct PassthroughDecoder<R: Read + Seek> {
     stream_serial: u32,
 }
 
+/// An error type that is returned when the passthrough fails.
 pub struct PassthroughError(ogg::OggReadError);
 
 impl<R: Read + Seek> PassthroughDecoder<R> {
-    /// Constructs a new Decoder from a given implementation of `Read + Seek`.
+    /// Constructs a new decoder from a given implementation of `Read + Seek`.
     pub fn new(rdr: R) -> Result<Self, PassthroughError> {
         let mut rdr = PacketReader::new(rdr);
         let mut wtr = PacketWriter::new(Vec::new());
@@ -87,13 +89,13 @@ impl<R: Read + Seek> PassthroughDecoder<R> {
         let stream_serial = write_headers(&mut rdr, &mut wtr)?;
         info!("Starting passthrough track with serial {}", stream_serial);
 
-        return Ok(PassthroughDecoder {
+        Ok(PassthroughDecoder {
             rdr,
             wtr,
             lastgp_page: Some(0),
             absgp_page: 0,
             stream_serial,
-        });
+        })
     }
 }
 

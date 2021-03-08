@@ -1,4 +1,10 @@
 #![allow(clippy::unused_io_amount)]
+#![deny(missing_docs)]
+
+//! Implements decoding audio with the ogg-vorbis protocol, via either the 
+//! [lewton](https://docs.rs/crate/lewton), [vorbis](https://docs.rs/crate/vorbis) or
+//! [tremor](https://docs.rs/crate/librespot-tremor) crates. Note that these are mutually exclusive
+//! features, and attempting to enable multiple of them will result in a compile error.
 
 #[macro_use]
 extern crate log;
@@ -40,12 +46,19 @@ pub use fetch::{
 };
 use std::fmt;
 
+/// A single packet of audio data.
 pub enum AudioPacket {
+    /// A list of 16 bit sample data.
     Samples(Vec<i16>),
+    /// Ogg encoded sound data.
     OggData(Vec<u8>),
 }
 
 impl AudioPacket {
+    /// Unwraps the `AudioPacket as `Samples`.
+    ///
+    /// ### Panics
+    /// Panics if the `AudioPacket` is of the variant `OggData`.
     pub fn samples(&self) -> &[i16] {
         match self {
             AudioPacket::Samples(s) => s,
@@ -53,6 +66,10 @@ impl AudioPacket {
         }
     }
 
+    /// Unwraps the `AudioPacket as `OggData`.
+    ///
+    /// ### Panics
+    /// Panics if the `AudioPacket` is of the variant `Samples`.
     pub fn oggdata(&self) -> &[u8] {
         match self {
             AudioPacket::Samples(_) => panic!("can't return samples on OggData"),
@@ -60,6 +77,7 @@ impl AudioPacket {
         }
     }
 
+    /// Returns true if the `AudioPacket` is empty.
     pub fn is_empty(&self) -> bool {
         match self {
             AudioPacket::Samples(s) => s.is_empty(),
@@ -68,9 +86,12 @@ impl AudioPacket {
     }
 }
 
+/// A type representing the ways audio encoding/decoding can fail/
 #[derive(Debug)]
 pub enum AudioError {
+    /// Used when an error occured during the passthough.
     PassthroughError(PassthroughError),
+    /// Used when the ogg vorbis decoding failed.
     VorbisError(VorbisError),
 }
 
@@ -85,17 +106,21 @@ impl fmt::Display for AudioError {
 
 impl From<VorbisError> for AudioError {
     fn from(err: VorbisError) -> AudioError {
-        AudioError::VorbisError(VorbisError::from(err))
+        AudioError::VorbisError(err)
     }
 }
 
 impl From<PassthroughError> for AudioError {
     fn from(err: PassthroughError) -> AudioError {
-        AudioError::PassthroughError(PassthroughError::from(err))
+        AudioError::PassthroughError(err)
     }
 }
 
+/// Represents any type that can be used to decode audio files.
 pub trait AudioDecoder {
+    /// A `io::Seek` like interface that uses milliseconds instead of bytes as a offset.
     fn seek(&mut self, ms: i64) -> Result<(), AudioError>;
+
+    /// Returns the next packet, if there is one.
     fn next_packet(&mut self) -> Result<Option<AudioPacket>, AudioError>;
 }

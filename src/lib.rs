@@ -1,8 +1,22 @@
 #![crate_name = "librespot"]
 
-pub use librespot_audio as audio;
-pub use librespot_connect as connect;
-pub use librespot_core as core;
-pub use librespot_metadata as metadata;
-pub use librespot_playback as playback;
-pub use librespot_protocol as protocol;
+pub mod audio {
+    //! Utilities related to decoding audio packets.
+
+    pub use librespot_audio::*;
+}
+pub mod connect {
+    pub use librespot_connect::*;
+}
+pub mod core {
+    pub use librespot_core::*;
+}
+pub mod metadata {
+    pub use librespot_metadata::*;
+}
+pub mod playback {
+    pub use librespot_playback::*;
+}
+pub mod protocol {
+    pub use librespot_protocol::*;
+}

@@ -10,12 +10,17 @@ const AUDIO_AESIV: [u8; 16] = [
     0x72, 0xe0, 0x67, 0xfb, 0xdd, 0xcb, 0xcf, 0x77, 0xeb, 0xe8, 0xbc, 0x64, 0x3f, 0x63, 0x0d, 0x93,
 ];
 
-pub struct AudioDecrypt<T: io::Read> {
+/// The `AudioDecrypt` struct wraps a reader that implements `io::Read`, and then presents its own
+/// `io::Read` which yield decripted data. An implementation for `io::Seek` is also presented
+/// similarly.
+pub struct AudioDecrypt<T> {
     cipher: Aes128Ctr,
     reader: T,
 }
 
-impl<T: io::Read> AudioDecrypt<T> {
+impl<T> AudioDecrypt<T> {
+    /// Construct a new AudioDecrypt from a private key and a reader, whose `io::Read` and
+    /// `io::Seek` implementations are provided.
     pub fn new(key: AudioKey, reader: T) -> AudioDecrypt<T> {
         let cipher = Aes128Ctr::new(
             &GenericArray::from_slice(&key.0),
@@ -35,7 +40,7 @@ impl<T: io::Read> io::Read for AudioDecrypt<T> {
     }
 }
 
-impl<T: io::Read + io::Seek> io::Seek for AudioDecrypt<T> {
+impl<T: io::Seek> io::Seek for AudioDecrypt<T> {
     fn seek(&mut self, pos: io::SeekFrom) -> io::Result<u64> {
         let newpos = self.reader.seek(pos)?;
 

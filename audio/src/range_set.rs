@@ -1,238 +1,283 @@
-use std::cmp::{max, min};
+use std::{cmp::{max, min}};
 use std::fmt;
-use std::slice::Iter;
 
-#[derive(Copy, Clone, Debug)]
-pub struct Range {
-    pub start: usize,
-    pub length: usize,
-}
+mod range;
+pub(crate) use range::Range;
 
-impl fmt::Display for Range {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        return write!(f, "[{}, {}]", self.start, self.start + self.length - 1);
-    }
-}
-
-impl Range {
-    pub fn new(start: usize, length: usize) -> Range {
-        return Range {
-            start: start,
-            length: length,
-        };
-    }
-
-    pub fn end(&self) -> usize {
-        return self.start + self.length;
-    }
-}
-
-#[derive(Clone)]
+/// A set of ranges.
+#[derive(Clone, Default, Debug, PartialEq)]
 pub struct RangeSet {
+    /// For the implementation it is assumed that `ranges` is ordered by `range.start()`.
     ranges: Vec<Range>,
 }
 
 impl fmt::Display for RangeSet {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "(").unwrap();
-        for range in self.ranges.iter() {
-            write!(f, "{}", range).unwrap();
+        write!(f, "(")?;
+        for range in &self.ranges {
+            write!(f, "{}", range)?;
         }
         write!(f, ")")
     }
 }
 
+impl std::ops::Index<usize> for RangeSet {
+    type Output = Range;
+
+    fn index(&self, index: usize) -> &Self::Output {
+        &self.ranges[index]
+    }
+}
+
+impl std::ops::IndexMut<usize> for RangeSet {
+    fn index_mut(&mut self, index: usize) -> &mut Self::Output {
+        &mut self.ranges[index]
+    }
+}
+
+impl IntoIterator for RangeSet {
+    type Item = Range;
+
+    type IntoIter = <Vec<Range> as IntoIterator>::IntoIter;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.ranges.into_iter()
+    }
+}
+
+impl From<Vec<Range>> for RangeSet {
+    fn from(ranges: Vec<Range>) -> Self {
+        let mut res = RangeSet::new();
+        for range in ranges {
+            res += range;
+        }
+        res
+    }
+}
+
 impl RangeSet {
     pub fn new() -> RangeSet {
-        RangeSet {
-            ranges: Vec::<Range>::new(),
-        }
+        Self::default()
     }
 
     pub fn is_empty(&self) -> bool {
-        return self.ranges.is_empty();
+        self.ranges.is_empty()
     }
 
     pub fn len(&self) -> usize {
-        self.ranges.iter().map(|r| r.length).sum()
+        self.ranges.iter().map(Range::len).sum()
     }
 
-    pub fn get_range(&self, index: usize) -> Range {
-        return self.ranges[index].clone();
-    }
-
-    pub fn iter(&self) -> Iter<Range> {
-        return self.ranges.iter();
+    pub fn iter(&self) -> impl Iterator<Item=&Range> {
+        self.ranges.iter()
     }
 
     pub fn contains(&self, value: usize) -> bool {
-        for range in self.ranges.iter() {
-            if value < range.start {
-                return false;
-            } else if range.start <= value && value < range.end() {
-                return true;
-            }
-        }
-        return false;
+        self
+            .iter()
+            .any(|r| r.contains(value))
     }
 
+    /// Finds the first `Range` in `self.ranges` which contains `value`, and returns the number of
+    /// elements that are left in that `Range`.
     pub fn contained_length_from_value(&self, value: usize) -> usize {
-        for range in self.ranges.iter() {
-            if value < range.start {
-                return 0;
-            } else if range.start <= value && value < range.end() {
-                return range.end() - value;
-            }
-        }
-        return 0;
+        self
+            .iter()
+            .take_while(|r| value >= r.start()) // stop once the ranges no longer contain this value
+            .find(|r| r.contains(value)) // find the first range that contains this value
+            .map(|r| r.end() - value) // calculate the remaining elements in that range
+            .unwrap_or(0) // return zero otherwise
     }
 
     #[allow(dead_code)]
     pub fn contains_range_set(&self, other: &RangeSet) -> bool {
-        for range in other.ranges.iter() {
-            if self.contained_length_from_value(range.start) < range.length {
-                return false;
-            }
-        }
-        true
+        other.iter().all(|r| self.contained_length_from_value(r.start()) >= r.len())
     }
+}
 
-    pub fn add_range(&mut self, range: &Range) {
-        if range.length == 0 {
+impl std::ops::AddAssign<Range> for RangeSet {
+    fn add_assign(&mut self, range: Range) {
+        if range.is_empty() {
             // the interval is empty -> nothing to do.
             return;
         }
 
         for index in 0..self.ranges.len() {
+            let mut cur = self[index];
             // the new range is clear of any ranges we already iterated over.
-            if range.end() < self.ranges[index].start {
-                // the new range starts after anything we already passed and ends before the next range starts (they don't touch) -> insert it.
-                self.ranges.insert(index, *range);
-                return;
-            } else if range.start <= self.ranges[index].end()
-                && self.ranges[index].start <= range.end()
-            {
+            if range.end() < cur.start() {
+                // the new range starts after anything we already passed and ends before the next
+                // range starts (they don't touch) -> insert it.
+                self.ranges.insert(index, range);
+                return
+            } else if range.start() <= cur.end() && cur.start() <= range.end() {
                 // the new range overlaps (or touches) the first range. They are to be merged.
                 // In addition we might have to merge further ranges in as well.
 
-                let mut new_range = *range;
-
-                while index < self.ranges.len() && self.ranges[index].start <= new_range.end() {
-                    let new_end = max(new_range.end(), self.ranges[index].end());
-                    new_range.start = min(new_range.start, self.ranges[index].start);
-                    new_range.length = new_end - new_range.start;
+                let mut new_range = range;
+                while cur.start() <= new_range.end() {
+                    let new_end = max(new_range.end(), cur.end());
+                    let new_start = min(new_range.start(), cur.start());
+                    new_range = (new_start..new_end).into();
                     self.ranges.remove(index);
+                    if index >= self.ranges.len() {
+                        break;
+                    }
+                    cur = self[index];
                 }
 
                 self.ranges.insert(index, new_range);
-                return;
+                return
             }
         }
 
         // the new range is after everything else -> just add it
-        self.ranges.push(*range);
+        self.ranges.push(range);
     }
+}
 
-    #[allow(dead_code)]
-    pub fn add_range_set(&mut self, other: &RangeSet) {
-        for range in other.ranges.iter() {
-            self.add_range(range);
+impl std::ops::Add<Range> for RangeSet {
+    type Output = RangeSet;
+
+    fn add(mut self, rhs: Range) -> Self::Output {
+        // let mut cpy = self.clone();
+        self += rhs;
+        self
+    }
+}
+
+impl std::ops::AddAssign<&RangeSet> for RangeSet {
+    fn add_assign(&mut self, rhs: &RangeSet) {
+        for &range in rhs.iter() {
+            *self += range;
         }
     }
+}
 
-    #[allow(dead_code)]
-    pub fn union(&self, other: &RangeSet) -> RangeSet {
-        let mut result = self.clone();
-        result.add_range_set(other);
-        return result;
+impl std::ops::Add<&RangeSet> for RangeSet {
+    type Output = RangeSet;
+
+    fn add(mut self, rhs: &RangeSet) -> Self::Output {
+        self += rhs;
+        self
     }
+}
 
-    pub fn subtract_range(&mut self, range: &Range) {
-        if range.length == 0 {
+impl std::ops::Add<&RangeSet> for &RangeSet {
+    type Output = RangeSet;
+
+    fn add(self, rhs: &RangeSet) -> Self::Output {
+        let mut cpy = self.clone();
+        cpy += rhs;
+        cpy
+    }
+}
+
+impl std::ops::SubAssign<Range> for RangeSet {
+    fn sub_assign(&mut self, to_sub: Range) {
+        if to_sub.len() == 0 {
             return;
         }
 
         for index in 0..self.ranges.len() {
+            let cur = self[index];
             // the ranges we already passed don't overlap with the range to remove
-
-            if range.end() <= self.ranges[index].start {
+            if to_sub.end() <= cur.start() {
                 // the remaining ranges are past the one to subtract. -> we're done.
                 return;
-            } else if range.start <= self.ranges[index].start
-                && self.ranges[index].start < range.end()
-            {
-                // the range to subtract started before the current range and reaches into the current range
-                // -> we have to remove the beginning of the range or the entire range and do the same for following ranges.
+            }
+            if to_sub.start() <= cur.start() && cur.start() < to_sub.end() {
+                // the range to subtract started before the current range and reaches into the
+                // current range -> we have to remove the beginning of the range or the entire range
+                // and do the same for following ranges.
 
-                while index < self.ranges.len() && self.ranges[index].end() <= range.end() {
+                while index < self.ranges.len() && self[index].end() <= to_sub.end() {
                     self.ranges.remove(index);
                 }
 
-                if index < self.ranges.len() && self.ranges[index].start < range.end() {
-                    self.ranges[index].length -= range.end() - self.ranges[index].start;
-                    self.ranges[index].start = range.end();
+                if index < self.ranges.len() && self[index].start() < to_sub.end() {
+                    self[index] = (to_sub.end()..self[index].start()).into();
                 }
-
                 return;
-            } else if range.end() < self.ranges[index].end() {
-                // the range to subtract punches a hole into the current range -> we need to create two smaller ranges.
-
-                let first_range = Range {
-                    start: self.ranges[index].start,
-                    length: range.start - self.ranges[index].start,
-                };
-
-                self.ranges[index].length -= range.end() - self.ranges[index].start;
-                self.ranges[index].start = range.end();
-
+            } else if to_sub.end() < cur.end() {
+                // the range to subtract punches a hole into the current range -> we need to create
+                // two smaller ranges.
+                let first_range = (cur.start()..to_sub.start()).into();
+                self[index] = (to_sub.end()..cur.end()).into();
                 self.ranges.insert(index, first_range);
-
                 return;
-            } else if range.start < self.ranges[index].end() {
-                // the range truncates the existing range -> truncate the range. Let the for loop take care of overlaps with other ranges.
-                self.ranges[index].length = range.start - self.ranges[index].start;
+            } else if to_sub.start() < cur.end() {
+                // the range truncates the existing range -> truncate the range. Let the for loop 
+                // take care of overlaps with other ranges.
+                self[index] = (self[index].start()..to_sub.start()).into();
             }
         }
     }
+}
 
-    pub fn subtract_range_set(&mut self, other: &RangeSet) {
-        for range in other.ranges.iter() {
-            self.subtract_range(range);
+impl std::ops::Sub<Range> for RangeSet {
+    type Output = RangeSet;
+
+    fn sub(self, rhs: Range) -> Self::Output {
+        let mut cpy = self.clone();
+        cpy -= rhs;
+        cpy
+        
+    }
+}
+
+impl std::ops::SubAssign<&RangeSet> for RangeSet {
+    fn sub_assign(&mut self, rhs: &RangeSet) {
+        for &range in rhs.iter() {
+            *self -= range;
         }
     }
+}
 
-    pub fn minus(&self, other: &RangeSet) -> RangeSet {
-        let mut result = self.clone();
-        result.subtract_range_set(other);
-        return result;
+impl std::ops::Sub<&RangeSet> for RangeSet {
+    type Output = RangeSet;
+
+    fn sub(mut self, rhs: &RangeSet) -> Self::Output {
+        self += rhs;
+        self
     }
+}
 
-    pub fn intersection(&self, other: &RangeSet) -> RangeSet {
+impl std::ops::Sub<&RangeSet> for &RangeSet {
+    type Output = RangeSet;
+
+    fn sub(self, rhs: &RangeSet) -> Self::Output {
+        let mut cpy = self.clone();
+        cpy -= rhs;
+        cpy
+    }
+}
+
+impl std::ops::BitAnd<&RangeSet> for RangeSet {
+    type Output = RangeSet;
+
+    fn bitand(self, other: &RangeSet) -> Self::Output {
         let mut result = RangeSet::new();
 
         let mut self_index: usize = 0;
         let mut other_index: usize = 0;
 
         while self_index < self.ranges.len() && other_index < other.ranges.len() {
-            if self.ranges[self_index].end() <= other.ranges[other_index].start {
+            let self_range = self[self_index];
+            let other_range = other[other_index];
+            if self_range.end() <= other_range.start() {
                 // skip the interval
                 self_index += 1;
-            } else if other.ranges[other_index].end() <= self.ranges[self_index].start {
+            } else if other_range.end() <= self_range.start() {
                 // skip the interval
                 other_index += 1;
             } else {
                 // the two intervals overlap. Add the union and advance the index of the one that ends first.
-                let new_start = max(
-                    self.ranges[self_index].start,
-                    other.ranges[other_index].start,
-                );
-                let new_end = min(
-                    self.ranges[self_index].end(),
-                    other.ranges[other_index].end(),
-                );
-                assert!(new_start <= new_end);
-                result.add_range(&Range::new(new_start, new_end - new_start));
-                if self.ranges[self_index].end() <= other.ranges[other_index].end() {
+                let new_start = max(self_range.start(), other_range.start());
+                let new_end = min(self_range.end(), other_range.end());
+                let new_range: Range = (new_start..new_end).into();
+                result += new_range;
+                if self_range.end() <= other_range.end() {
                     self_index += 1;
                 } else {
                     other_index += 1;
@@ -240,6 +285,136 @@ impl RangeSet {
             }
         }
 
-        return result;
+        result
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn test_set1() -> RangeSet {
+        vec![
+            (0..10).into(),
+            (20..30).into(),
+        ].into()
+    }
+
+    fn test_set2() -> RangeSet {
+        vec![
+            (0..20).into(),
+            (20..30).into(),
+        ].into()
+    }
+
+    fn test_set3() -> RangeSet {
+        vec![
+            (0..10).into(),
+            (10..20).into(),
+            (20..30).into(),
+        ].into()
+    }
+
+    fn test_set4() -> RangeSet {
+        vec![
+            (20..30).into(),
+        ].into()
+    }
+
+    fn is_sorted(rs: &RangeSet) -> bool {
+        let first = rs[0];
+        rs
+            .ranges[1..]
+            .iter()
+            .fold((true, first), |(is_sorted, prev), &r| (is_sorted && prev.start() <= r.start(), r))
+            .0
+    }
+
+    #[test]
+    fn test_is_empty() {
+        let empty_set: RangeSet = Vec::new().into();
+        assert!(empty_set.is_empty());
+    }
+
+    #[test]
+    fn test_len() {
+        assert_eq!(test_set1().len(), 20);
+        assert_eq!(test_set2().len(), 30);
+        assert_eq!(test_set3().len(), 30);
+    }
+
+    #[test]
+    fn test_contains() {
+        assert!(test_set1().contains(0));
+        assert!(test_set1().contains(5));
+        assert!(!test_set1().contains(10));
+
+        assert!(test_set2().contains(0));
+        assert!(test_set2().contains(20));
+        assert!(!test_set2().contains(30));
+
+        assert!(test_set3().contains(0));
+        assert!(test_set3().contains(5));
+        assert!(test_set3().contains(10));
+    }
+
+    #[test]
+    fn contained_length_from_value() {
+        assert_eq!(test_set1().contained_length_from_value(0), 10);
+        assert_eq!(test_set1().contained_length_from_value(10), 0);
+        assert_eq!(test_set1().contained_length_from_value(20), 10);
+        
+        // todo: should these tests pass?
+        // assert_eq!(test_set2().contained_length_from_value(0), 30);
+        // assert_eq!(test_set2().contained_length_from_value(30), 0);
+        
+        // assert_eq!(test_set3().contained_length_from_value(0), 30);
+        // assert_eq!(test_set3().contained_length_from_value(10), 20);
+        // assert_eq!(test_set3().contained_length_from_value(20), 10);
+        // assert_eq!(test_set3().contained_length_from_value(30), 10);
+    }
+
+    #[test]
+    fn test_contains_range_set() {
+        assert!(test_set1().contains_range_set(&test_set1()));
+        assert!(!test_set1().contains_range_set(&test_set2()));
+        assert!(!test_set1().contains_range_set(&test_set3()));
+
+        assert!(test_set2().contains_range_set(&test_set1()));
+        assert!(test_set2().contains_range_set(&test_set2()));
+        assert!(test_set2().contains_range_set(&test_set3()));
+
+        assert!(test_set3().contains_range_set(&test_set1()));
+        assert!(test_set3().contains_range_set(&test_set2()));
+        assert!(test_set3().contains_range_set(&test_set3()));
+    }
+
+    #[test]
+    fn test_add() {
+        let mut test1 = test_set1();
+        let to_add: Range = (0..10).into();
+        test1 += to_add;
+        assert_eq!(test_set1(), test1);
+        let to_add: Range = (10..20).into();
+        test1 += to_add;
+        assert_eq!(test_set2(), test1);
+        let to_add: Range = (5..15).into();
+        test1 += to_add;
+        assert_eq!(test_set2(), test1);
+
+        assert!(is_sorted(&test1));
+    }
+
+    #[test]
+    fn test_sub() {
+        let mut test1 = test_set1();
+        let to_sub: Range = (0..10).into();
+        test1 -= to_sub;
+        assert_eq!(test_set4(), test1);
+
+        let mut test3 = test_set3();
+        let to_sub: Range = (10..20).into();
+        test3 -= to_sub;
+        assert_eq!(test_set1(), test3);
     }
 }
