@@ -16,7 +16,7 @@ impl fmt::Display for Range {
 
 impl From<std::ops::Range<usize>> for Range {
     fn from(r: std::ops::Range<usize>) -> Self {
-        debug_assert!(r.start < r.end);
+        assert!(r.start < r.end);
         Self {
             start: r.start,
             end: r.end,
@@ -38,10 +38,6 @@ impl Range {
 
     pub fn end(&self) -> usize {
         self.end
-    }
-    
-    pub fn end_mut(&mut self) -> &mut usize {
-        &mut self.end
     }
 
     pub fn len(&self) -> usize {
