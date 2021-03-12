@@ -196,7 +196,7 @@ impl std::ops::SubAssign<Range> for RangeSet {
                 }
 
                 if index < self.ranges.len() && self[index].start() < to_sub.end() {
-                    self[index] = (to_sub.end()..self[index].start()).into();
+                    self[index] = (to_sub.end()..self[index].end()).into();
                 }
                 return;
             } else if to_sub.end() < cur.end() {
@@ -416,5 +416,11 @@ mod tests {
         let to_sub: Range = (10..20).into();
         test3 -= to_sub;
         assert_eq!(test_set1(), test3);
+
+        let mut test4: RangeSet = vec![(0..221184).into()].into();
+        let to_sub: Range = (0..69632).into();
+        test4 -= to_sub;
+        let res: RangeSet = vec![(69632..221184).into()].into();
+        assert_eq!(res, test4);
     }
 }
